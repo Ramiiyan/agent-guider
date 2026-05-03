@@ -28,7 +28,7 @@ Claude Code will ask for your specific paths and config, then drive the full set
 
 | Guide | What it sets up | Blog post |
 |---|---|---|
-| [wso2-mi-ibmmq](./wso2/wso2-mi-ibmmq/SETUP_GUIDE.md) | WSO2 Micro Integrator 4.x connected to IBM MQ via JMS Inbound Endpoint | [Read on Medium](#) |
+| [wso2-mi-ibmmq](./wso2/wso2-mi-ibmmq/SETUP_GUIDE.md) | WSO2 Micro Integrator 4.x connected to IBM MQ via JMS Inbound Endpoint | [Read on Medium](https://medium.com/@ramiiyan.sriraguhan/connecting-ibm-mq-with-wso2-mi-the-hard-way-and-the-ai-way-c543391dabfd) |
 
 ---
 
