@@ -29,7 +29,7 @@ Each guide folder says how to start it:
 | Guide | What it sets up | Blog post |
 |---|---|---|
 | [wso2-mi-ibmmq](./wso2/wso2-mi-ibmmq/SETUP_GUIDE.md) | WSO2 Micro Integrator 4.x connected to IBM MQ via JMS Inbound Endpoint | [Read on Medium](https://medium.com/@ramiiyan.sriraguhan/connecting-ibm-mq-with-wso2-mi-the-hard-way-and-the-ai-way-c543391dabfd) |
-| [wso2-migration](./wso2/wso2-migration/README.md) | Generates WSO2 APIM data migration scripts (with DB checkpoints) from your WSO2 migration guide — run `/generate-migration-scripts` | *Coming soon* |
+| [wso2-migration](./wso2/wso2-migration/README.md) | Generates WSO2 APIM data migration scripts (with DB checkpoints) from your WSO2 migration guide — run `/generate-migration-scripts` | [Read on Medium](https://medium.com/@ramiiyan.sriraguhan/automating-wso2-apim-data-migration-treat-the-runbook-like-code-with-checkpoints-352bb199b6c8) |
 
 ---
 
