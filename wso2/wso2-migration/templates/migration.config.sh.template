@@ -1,0 +1,111 @@
+#!/bin/bash
+# =============================================================================
+# migration.config.sh — Central configuration for WSO2 APIM Data Migration
+#
+# INSTRUCTIONS:
+#   1. Set MOUNT_DIR (below) to the absolute path of this workspace directory
+#      on the VM/server where you will run these migration scripts.
+#      e.g. if you copied the workspace to /opt/migration/workspace, set:
+#        MOUNT_DIR="/opt/migration/workspace"
+#   2. Fill in every value marked with <REPLACE_...>
+#   3. Set feature flags (ENABLE_*) to true/false based on your setup
+#   4. All migration scripts source this file — never hardcode values in scripts
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# !! FIRST THING TO SET !! — Workspace path on your VM/server
+# -----------------------------------------------------------------------------
+# Set this to wherever you copied the workspace/ directory on your target VM.
+# All other paths below are derived from this — it's the only path you MUST set.
+MOUNT_DIR="<SET_THIS_TO_YOUR_WORKSPACE_PATH_ON_THE_VM>"   # e.g. "/opt/migration/workspace"
+
+# -----------------------------------------------------------------------------
+# MIGRATION VERSIONS
+# -----------------------------------------------------------------------------
+SOURCE_VERSION="<REPLACE_SOURCE_VERSION>"        # e.g. "4.1.0"
+TARGET_VERSION="<REPLACE_TARGET_VERSION>"        # e.g. "4.5.0"
+
+# IS (Identity Server) versions embedded in APIM (for IS component migration)
+IS_SOURCE_VERSION="<REPLACE_IS_SOURCE_VERSION>"  # e.g. "5.11.0"
+IS_TARGET_VERSION="<REPLACE_IS_TARGET_VERSION>"  # e.g. "6.0.0"
+
+# Required Java major version for the target APIM pack
+JAVA_REQUIRED_VERSION="<REPLACE_JAVA_VERSION>"   # e.g. "21"
+
+# -----------------------------------------------------------------------------
+# DATABASE
+# -----------------------------------------------------------------------------
+DB_HOST="<REPLACE_DB_HOST>"                      # Hostname or IP only — no ":port" here
+DB_PORT="<REPLACE_DB_PORT>"                      # e.g. "3306" (MySQL default)
+DB_ROOT_USER="<REPLACE_DB_ROOT_USER>"            # Root/admin user for DB ops
+DB_APIM_NAME="<REPLACE_APIM_DB_NAME>"           # e.g. "wso2am_db"
+DB_SHARED_NAME="<REPLACE_SHARED_DB_NAME>"        # e.g. "wso2shared_db"
+
+# DB user created/used by the APIM server (for restore script)
+APIM_DB_USER="<REPLACE_APIM_DB_USER>"
+APIM_DB_PASSWORD="<REPLACE_APIM_DB_PASSWORD>"
+
+# -----------------------------------------------------------------------------
+# PATHS — all derived from MOUNT_DIR above
+# -----------------------------------------------------------------------------
+
+# Configurations — deployment.toml, JDBC driver, velocity template
+ARTIFACTS_DIR="$MOUNT_DIR/configurations"
+
+# Security — JKS keystore files copied from source APIM
+JKS_SOURCE_DIR="$MOUNT_DIR/configurations/security"
+
+# DB dump directory (Script 1 writes here, Script 2 reads from here)
+DUMP_DIR="$MOUNT_DIR/db_dumps"
+
+# Migration artifact directories — IS client, APIM client, DB scripts
+MIGRATION_ARTIFACTS_DIR="$MOUNT_DIR/migration-artifacts"
+IS_MIGRATION_DIR="$MIGRATION_ARTIFACTS_DIR/is"
+APIM_MIGRATION_DIR="$MIGRATION_ARTIFACTS_DIR/apim"
+DB_SCRIPT_PATH="$MIGRATION_ARTIFACTS_DIR/db-scripts/<REPLACE_DB_TYPE>.sql"  # e.g. MySQL.sql
+
+# APIM pack — exact ZIP filename (incl. build suffix), where it lives, where it unzips
+# IMPORTANT: use the EXACT filename you were given — do not reconstruct it from
+# TARGET_VERSION, since the build suffix (e.g. wso2am-4.5.0.5.zip) won't match.
+PACK_ZIP_NAME="<REPLACE_PACK_ZIP_FILENAME>"          # e.g. "wso2am-4.5.0.5.zip"
+PACK_SOURCE="$MOUNT_DIR/apim_packs/$PACK_ZIP_NAME"
+UNZIP_DEST="$MOUNT_DIR"
+APIM_HOME="$UNZIP_DEST/wso2am-${TARGET_VERSION}"      # adjust if extracted folder differs
+
+# -----------------------------------------------------------------------------
+# WSO2 UPDATE (U2)
+# -----------------------------------------------------------------------------
+ENABLE_U2_UPDATE="<REPLACE_true_or_false>"
+U2_LEVEL="<REPLACE_U2_LEVEL>"                   # e.g. "28" — target update level
+
+# -----------------------------------------------------------------------------
+# CUSTOMIZATIONS — set each to true/false based on your setup
+# -----------------------------------------------------------------------------
+
+# UI customizations (DevPortal / Publisher front-end)
+ENABLE_UI_CUSTOMIZATIONS="<REPLACE_true_or_false>"
+CUSTOMIZATIONS_DIR="$MOUNT_DIR/customizations/<REPLACE_CUSTOMIZATION_DIR_NAME>"
+
+# Custom handler JARs (lib/ and dropins/)
+ENABLE_CUSTOM_HANDLERS="<REPLACE_true_or_false>"
+CUSTOM_HANDLERS_DIR="$MOUNT_DIR/customizations/custom_handlers"
+
+# Custom velocity_template.xml
+ENABLE_CUSTOM_VELOCITY_TEMPLATE="<REPLACE_true_or_false>"
+CUSTOM_VELOCITY_TEMPLATE="$ARTIFACTS_DIR/<REPLACE_VELOCITY_TEMPLATE_FILENAME>"
+
+# JKS keystore migration from source APIM
+ENABLE_JKS_MIGRATION="<REPLACE_true_or_false>"
+
+# Ciphertool configuration after pack setup
+ENABLE_CIPHERTOOL="<REPLACE_true_or_false>"
+
+# IS component migration (set false if IS runs as a separate server)
+ENABLE_IS_MIGRATION="<REPLACE_true_or_false>"
+
+# -----------------------------------------------------------------------------
+# Sanity check — DB_HOST must not contain a port (use DB_PORT instead)
+# -----------------------------------------------------------------------------
+case "$DB_HOST" in
+    *:*) echo "ERROR: DB_HOST=\"$DB_HOST\" contains a port. Put the host in DB_HOST and the port in DB_PORT."; exit 1 ;;
+esac

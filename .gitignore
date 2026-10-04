@@ -1,0 +1,55 @@
+# ---- Security files (never commit keystores / certs) ----
+*.jks
+*.p12
+*.pfx
+*.keystore
+
+# ---- WSO2 Proprietary Artifacts ----
+# Migration clients and DB scripts come from WSO2 Support — do not commit
+*.zip
+*.jar
+*.sql.gz
+
+# ---- WSO2 Migration Toolkit — user workspace ----
+wso2/wso2-migration/workspace/migration-docs/*
+!wso2/wso2-migration/workspace/migration-docs/.gitkeep
+
+wso2/wso2-migration/workspace/migration-artifacts/is/*
+!wso2/wso2-migration/workspace/migration-artifacts/is/.gitkeep
+
+wso2/wso2-migration/workspace/migration-artifacts/apim/*
+!wso2/wso2-migration/workspace/migration-artifacts/apim/.gitkeep
+
+wso2/wso2-migration/workspace/migration-artifacts/db-scripts/*
+!wso2/wso2-migration/workspace/migration-artifacts/db-scripts/.gitkeep
+
+wso2/wso2-migration/workspace/configurations/*
+!wso2/wso2-migration/workspace/configurations/.gitkeep
+!wso2/wso2-migration/workspace/configurations/security/
+wso2/wso2-migration/workspace/configurations/security/*
+!wso2/wso2-migration/workspace/configurations/security/.gitkeep
+
+wso2/wso2-migration/workspace/generated-scripts/*
+!wso2/wso2-migration/workspace/generated-scripts/.gitkeep
+
+wso2/wso2-migration/workspace/apim_packs/*
+!wso2/wso2-migration/workspace/apim_packs/.gitkeep
+
+wso2/wso2-migration/workspace/customizations/*
+!wso2/wso2-migration/workspace/customizations/.gitkeep
+!wso2/wso2-migration/workspace/customizations/custom_handlers/
+wso2/wso2-migration/workspace/customizations/custom_handlers/*
+!wso2/wso2-migration/workspace/customizations/custom_handlers/.gitkeep
+
+# Snapshots — never commit database dumps
+wso2/wso2-migration/workspace/db_dumps/
+
+# ---- OS files ----
+.DS_Store
+Thumbs.db
+
+# ---- Editor / IDE ----
+.idea/
+.vscode/
+*.swp
+*.swo

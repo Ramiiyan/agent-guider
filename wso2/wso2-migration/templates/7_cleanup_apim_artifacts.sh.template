@@ -1,0 +1,128 @@
+#!/bin/bash
+# =============================================================================
+# Script 7: Cleanup APIM Artifacts + Post-Migration Guidance
+# Purpose : Remove APIM migration JAR and migration-resources from APIM_HOME
+#           after successful APIM component migration. Prints post-migration
+#           startup actions (re-indexing, server restart) as guided next steps.
+# =============================================================================
+
+set -e
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/lib"
+[ -d "$LIB_DIR" ] || { echo "ERROR: $LIB_DIR not found. Copy the whole generated-scripts/ folder, including lib/."; exit 1; }
+source "$LIB_DIR/logging.sh"
+source "$SCRIPT_DIR/migration.config.sh"
+
+log_section "WSO2 APIM $SOURCE_VERSION → $TARGET_VERSION — APIM Artifacts Cleanup"
+log_info "APIM_HOME: $APIM_HOME"
+
+[ -d "$APIM_HOME" ] || { log_error "APIM_HOME not found: $APIM_HOME"; exit 1; }
+
+# Safety check
+log_warn "IMPORTANT: WSO2 API Manager must be stopped before running this cleanup."
+read -p "Have you stopped the server and confirmed APIM migration completed? (yes/no): " confirm
+[[ "$confirm" == "yes" ]] || { log_error "Aborted. Stop the server and verify migration before continuing."; exit 1; }
+log_info "✓ Confirmed"
+echo
+
+APIM_DROPINS="$APIM_HOME/repository/components/dropins"
+MIGRATION_RESOURCES_DIR="$APIM_HOME/migration-resources"
+
+# Step 1 — Remove APIM migration JAR
+log_section "Step 1: Removing APIM Migration JAR from Dropins"
+APIM_JARS=$(find "$APIM_DROPINS" -name "org.wso2.carbon.apimgt.migrate.client-*.jar" 2>/dev/null || true)
+
+if [ -n "$APIM_JARS" ]; then
+    echo "$APIM_JARS" | while read -r jar; do
+        rm -f "$jar"
+        log_info "✓ Removed: $(basename "$jar")"
+    done
+else
+    log_warn "No APIM migration JARs found in dropins (may have already been removed)"
+fi
+
+# Step 2 — Remove migration-resources directory
+log_section "Step 2: Removing migration-resources Directory"
+if [ -d "$MIGRATION_RESOURCES_DIR" ]; then
+    DIR_SIZE=$(du -sh "$MIGRATION_RESOURCES_DIR" 2>/dev/null | cut -f1)
+    log_info "Directory size: $DIR_SIZE"
+    rm -rf "$MIGRATION_RESOURCES_DIR"
+    log_info "✓ migration-resources removed"
+else
+    log_warn "migration-resources not found (may have already been removed)"
+fi
+
+# Step 3 — Optional: clean validation reports
+log_section "Step 3: Validation Reports (Optional Cleanup)"
+VALIDATION_REPORTS_DIR="$APIM_HOME/validation-reports"
+
+if [ -d "$VALIDATION_REPORTS_DIR" ]; then
+    FILE_COUNT=$(find "$VALIDATION_REPORTS_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')
+    log_info "Found $FILE_COUNT validation report file(s)"
+    read -p "Remove validation reports? (yes/no): " remove_reports
+    [[ "$remove_reports" == "yes" ]] && { rm -rf "$VALIDATION_REPORTS_DIR"; log_info "✓ Validation reports removed"; } \
+        || log_info "Validation reports kept at: $VALIDATION_REPORTS_DIR"
+else
+    log_info "No validation reports directory found"
+fi
+
+################################################################################
+# POST-MIGRATION GUIDED ACTIONS
+# These steps must be done manually — the script prints clear instructions.
+################################################################################
+log_section "Post-Migration Actions — Follow These Steps to Complete Migration"
+
+echo ""
+log_warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log_warn "ACTION 1: Re-Index API Manager Artifacts"
+log_warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "  1. Add the following to deployment.toml:"
+echo "       $APIM_HOME/repository/conf/deployment.toml"
+echo ""
+echo "       [indexing]"
+echo "       re_indexing = 1"
+echo ""
+echo "     (If re_indexing already exists, increment its value by 1)"
+echo ""
+echo "  2. Backup and delete the solr directory if it exists:"
+echo "       cp -r $APIM_HOME/solr $APIM_HOME/solr.bkp"
+echo "       rm -rf $APIM_HOME/solr"
+echo ""
+
+# [DOC_STEP: Check if your migration doc mentions tenant-specific customizations to re-apply]
+log_warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log_warn "ACTION 2: Re-Apply Tenant-Specific Customizations (if any)"
+log_warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "  If you had tenant-specific userstores or customizations in $SOURCE_VERSION,"
+echo "  copy them from:"
+echo "    <APIM_${SOURCE_VERSION}_HOME>/repository/tenants/<tenantid>/"
+echo "  to:"
+echo "    $APIM_HOME/repository/tenants/<tenantid>/"
+echo ""
+
+log_warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log_warn "ACTION 3: Start the API Manager Server"
+log_warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "    cd $APIM_HOME/bin"
+echo "    sh api-manager.sh"
+echo ""
+
+# [DOC_STEP: Add any additional post-migration verification steps from the migration doc]
+log_warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log_warn "ACTION 4: Verify Migration"
+log_warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "  After server startup:"
+echo "  - Verify API Manager Publisher and Developer portals load correctly"
+echo "  - Confirm all APIs are accessible and functional"
+echo "  - Check database tables are properly migrated"
+echo "  - Review server logs for any errors"
+echo ""
+
+log_section "Migration Cleanup Complete"
+log_info "Data migration phase is done. Follow the post-migration actions above to finish."

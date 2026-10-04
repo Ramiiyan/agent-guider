@@ -1,0 +1,111 @@
+#!/bin/bash
+# =============================================================================
+# Script 2: Database Restore from Backup — APIM 4.1.0 → 4.5.0 Migration
+# Purpose : Drop and recreate target DBs, then import from dump files.
+#           Safe to re-run — drops existing DBs and reimports clean from backup.
+# =============================================================================
+
+set -e
+set -u
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "$REPO_ROOT/lib/logging.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../migration.config.sh"
+
+# Show available snapshots so the engineer can pick one without hunting for paths
+list_available_dumps() {
+    if ls "$DUMP_DIR"/*.sql >/dev/null 2>&1; then
+        log_info "Snapshots in $DUMP_DIR (newest first):"
+        ls -1t "$DUMP_DIR"/*.sql | sed 's|^.*/|    |'
+        log_info "  *_source_*  = original source backup    *_post-is_*  = checkpoint after IS migration"
+    else
+        log_warn "No .sql snapshots found in $DUMP_DIR — give full paths below."
+    fi
+}
+
+# Accept a full path, or just a file name from DUMP_DIR
+resolve_dump() {
+    local input="$1"
+    if [ -f "$input" ]; then echo "$input"
+    elif [ -f "$DUMP_DIR/$input" ]; then echo "$DUMP_DIR/$input"
+    else echo "$input"
+    fi
+}
+
+log_section "APIM $SOURCE_VERSION → $TARGET_VERSION — DB Restore"
+log_info "Host: $DB_HOST:$DB_PORT   Root user: $DB_ROOT_USER"
+echo
+
+command -v mysql >/dev/null 2>&1 || { log_error "mysql client not found. Aborting."; exit 1; }
+
+MAX_ATTEMPTS=3
+attempt=0
+while [ $attempt -lt $MAX_ATTEMPTS ]; do
+    read -s -p "Enter MySQL root password: " MYSQL_PASSWORD
+    echo
+    if mysql -h "$DB_HOST" -P "$DB_PORT" --protocol=TCP -u "$DB_ROOT_USER" -p"$MYSQL_PASSWORD" -e "SELECT 1;" >/dev/null 2>&1; then
+        log_info "✓ Password validated"
+        break
+    else
+        attempt=$((attempt + 1))
+        [ $attempt -lt $MAX_ATTEMPTS ] && log_warn "Invalid password. Attempt $attempt of $MAX_ATTEMPTS." || { log_error "Max attempts reached."; exit 1; }
+    fi
+done
+
+read -p "APIM DB name    [default: $DB_APIM_NAME]: " input_apim
+DB_APIM_NAME="${input_apim:-$DB_APIM_NAME}"
+
+read -p "Shared DB name  [default: $DB_SHARED_NAME]: " input_shared
+DB_SHARED_NAME="${input_shared:-$DB_SHARED_NAME}"
+
+list_available_dumps
+read -p "$DB_APIM_NAME dump file (name or path): " DUMP_FILE_APIM
+read -p "$DB_SHARED_NAME dump file (name or path): " DUMP_FILE_SHARED
+DUMP_FILE_APIM="$(resolve_dump "$DUMP_FILE_APIM")"
+DUMP_FILE_SHARED="$(resolve_dump "$DUMP_FILE_SHARED")"
+
+[ -f "$DUMP_FILE_APIM" ]   || { log_error "Dump file not found: $DUMP_FILE_APIM"; exit 1; }
+[ -f "$DUMP_FILE_SHARED" ] || { log_error "Dump file not found: $DUMP_FILE_SHARED"; exit 1; }
+log_info "Dump files verified"
+echo
+
+drop_and_create_db() {
+    local db_name="$1"
+    log_info "Dropping $db_name (if exists)..."
+    mysql -h "$DB_HOST" -P "$DB_PORT" --protocol=TCP -u "$DB_ROOT_USER" -p"$MYSQL_PASSWORD" \
+        -e "DROP DATABASE IF EXISTS \`$db_name\`;"
+    mysql -h "$DB_HOST" -P "$DB_PORT" --protocol=TCP -u "$DB_ROOT_USER" -p"$MYSQL_PASSWORD" \
+        -e "CREATE DATABASE \`$db_name\` CHARACTER SET latin1;"
+    log_info "✓ $db_name created"
+}
+
+drop_and_create_db "$DB_APIM_NAME"
+drop_and_create_db "$DB_SHARED_NAME"
+
+log_info "Granting privileges to $APIM_DB_USER ..."
+mysql -h "$DB_HOST" -P "$DB_PORT" --protocol=TCP -u "$DB_ROOT_USER" -p"$MYSQL_PASSWORD" <<SQL
+    CREATE USER IF NOT EXISTS '$APIM_DB_USER'@'%' IDENTIFIED BY '$APIM_DB_PASSWORD';
+    GRANT ALL PRIVILEGES ON \`$DB_APIM_NAME\`.* TO '$APIM_DB_USER'@'%';
+    GRANT ALL PRIVILEGES ON \`$DB_SHARED_NAME\`.* TO '$APIM_DB_USER'@'%';
+    FLUSH PRIVILEGES;
+SQL
+log_info "✓ Privileges granted"
+echo
+
+import_dump() {
+    local dump_file="$1"
+    local db_name="$2"
+    log_info "Importing $dump_file → $db_name ..."
+    sed -e 's/DEFINER[ ]*=[ ]*[^*]*\*/\*/g' \
+        -e '/^SET @@SESSION\.SQL_LOG_BIN/d' \
+        -e '/^SET @@GLOBAL\.GTID_PURGED/d' \
+        -e '/^SET @MYSQLDUMP_TEMP_LOG_BIN/d' \
+        "$dump_file" | mysql -h "$DB_HOST" -P "$DB_PORT" --protocol=TCP -u "$DB_ROOT_USER" -p"$MYSQL_PASSWORD" "$db_name"
+    log_info "✓ $db_name imported"
+}
+
+import_dump "$DUMP_FILE_APIM"   "$DB_APIM_NAME"
+import_dump "$DUMP_FILE_SHARED" "$DB_SHARED_NAME"
+
+log_section "DB Restore Complete"
+log_info "$DB_APIM_NAME and $DB_SHARED_NAME are ready for migration"

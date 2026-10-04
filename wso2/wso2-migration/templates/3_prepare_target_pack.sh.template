@@ -1,0 +1,199 @@
+#!/bin/bash
+# =============================================================================
+# Script 3: Prepare Target APIM Pack — WSO2 APIM Data Migration
+# Purpose : Unzip the target APIM pack, apply U2 updates, copy deployment.toml,
+#           JKS keystores, JDBC driver, UI customizations, and custom handlers.
+#           Run once before starting data migration scripts.
+# =============================================================================
+
+set -e
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/lib"
+[ -d "$LIB_DIR" ] || { echo "ERROR: $LIB_DIR not found. Copy the whole generated-scripts/ folder, including lib/."; exit 1; }
+source "$LIB_DIR/logging.sh"
+source "$LIB_DIR/file_utils.sh"
+source "$LIB_DIR/prereqs.sh"
+source "$SCRIPT_DIR/migration.config.sh"
+
+log_section "WSO2 APIM $SOURCE_VERSION → $TARGET_VERSION — Prepare Target Pack"
+check_permissions
+
+################################################################################
+# STEP 0: Install dependencies
+################################################################################
+install_all_dependencies "$JAVA_REQUIRED_VERSION"
+
+################################################################################
+# STEP 1: Unzip APIM pack
+################################################################################
+log_section "Step 1: Unzipping APIM Pack"
+
+[ -f "$PACK_SOURCE" ] || { log_error "Pack not found: $PACK_SOURCE"; exit 1; }
+
+if [ -d "$APIM_HOME" ]; then
+    log_warn "Directory already exists: $APIM_HOME"
+    read -p "Remove it and continue? (y/n): " -n 1 -r
+    echo
+    [[ $REPLY =~ ^[Yy]$ ]] || { log_error "Aborted."; exit 1; }
+    sudo rm -rf "$APIM_HOME"
+fi
+
+unzip -q "$PACK_SOURCE" -d "$UNZIP_DEST"
+log_info "✓ Pack unzipped to $UNZIP_DEST"
+
+################################################################################
+# STEP 2: Apply U2 Update (optional — controlled by ENABLE_U2_UPDATE)
+################################################################################
+if [ "${ENABLE_U2_UPDATE}" = "true" ]; then
+    log_section "Step 2: Applying U2 Update to Level $U2_LEVEL"
+
+    [ -f "$APIM_HOME/bin/wso2update_linux" ] || { log_error "wso2update_linux not found."; exit 1; }
+    chmod +x "$APIM_HOME/bin/wso2update_linux"
+
+    log_warn "WSO2 Update tool requires authentication"
+    read -p "Enter WSO2 username: " WSO2_USERNAME
+    read -s -p "Enter WSO2 password: " WSO2_PASSWORD
+    echo
+
+    export WSO2_UPDATES_SKIP_CONFLICTS="true"
+    cd "$APIM_HOME/bin"
+
+    log_info "Updating the U2 tool itself..."
+    ./wso2update_linux -u "$WSO2_USERNAME" --password "$WSO2_PASSWORD" || [[ $? -eq 2 ]]
+
+    log_info "Updating pack to U2 level $U2_LEVEL ..."
+    ./wso2update_linux -u "$WSO2_USERNAME" --password "$WSO2_PASSWORD" -l "$U2_LEVEL" --no-backup || [[ $? -eq 2 ]]
+
+    # Strip personal info from the update config
+    CONFIG_FILE="$APIM_HOME/updates/config.json"
+    if [ -f "$CONFIG_FILE" ]; then
+        jq '.username = "" | ."backup-dir" = "" | .product.backup = "" | .product."backup-size" = 0 | .service."access-token" = "" | .service."refresh-token" = ""' \
+            "$CONFIG_FILE" > tmp.$$.json && mv tmp.$$.json "$CONFIG_FILE"
+        log_info "✓ PI info removed from config.json"
+    fi
+
+    cd - > /dev/null
+    log_info "✓ U2 update applied"
+else
+    log_info "Skipping U2 update (ENABLE_U2_UPDATE=false)"
+fi
+
+################################################################################
+# STEP 3: Replace deployment.toml
+################################################################################
+log_section "Step 3: Replacing deployment.toml"
+
+NEW_TOML="$ARTIFACTS_DIR/deployment.toml"
+backup_and_replace_file \
+    "$NEW_TOML" \
+    "$APIM_HOME/repository/conf/deployment.toml" \
+    "deployment.toml"
+
+################################################################################
+# STEP 4: Copy JKS keystores (optional)
+################################################################################
+if [ "${ENABLE_JKS_MIGRATION}" = "true" ]; then
+    log_section "Step 4: Copying JKS Keystores"
+
+    SECURITY_DIR="$APIM_HOME/repository/resources/security"
+    BACKUP_DIR="$SECURITY_DIR/backup_$(date +%Y%m%d_%H%M%S)"
+
+    mkdir -p "$BACKUP_DIR"
+    ls "$SECURITY_DIR"/*.jks 1>/dev/null 2>&1 && cp "$SECURITY_DIR"/*.jks "$BACKUP_DIR/" && log_info "Existing JKS files backed up"
+    ls "$JKS_SOURCE_DIR"/*.jks 1>/dev/null 2>&1 && cp "$JKS_SOURCE_DIR"/*.jks "$SECURITY_DIR/" && log_info "✓ JKS files copied" \
+        || { log_error "No JKS files found in $JKS_SOURCE_DIR"; exit 1; }
+else
+    log_info "Skipping JKS migration (ENABLE_JKS_MIGRATION=false)"
+fi
+
+################################################################################
+# STEP 5: Copy JDBC driver
+################################################################################
+log_section "Step 5: Copying JDBC Driver"
+
+# [DOC_STEP: Set JDBC_JAR filename to match your DB type and driver version]
+JDBC_JAR="<REPLACE_JDBC_JAR_FILENAME>"   # e.g. mysql-connector-java-8.0.20.jar
+copy_file \
+    "$ARTIFACTS_DIR/$JDBC_JAR" \
+    "$APIM_HOME/repository/components/lib/$JDBC_JAR" \
+    "JDBC driver ($JDBC_JAR)"
+
+################################################################################
+# STEP 6: Copy UI customizations (optional)
+################################################################################
+if [ "${ENABLE_UI_CUSTOMIZATIONS}" = "true" ]; then
+    log_section "Step 6: Copying UI Customizations"
+
+    # [DOC_STEP: Add/remove copy_file / replace_directory / backup_and_replace_file
+    #  calls based on your specific UI customization files.
+    #  Common targets: devportal/site/public/dist, publisher/site/public/dist,
+    #  index.jsp, userTheme.json, userThemes.js, custom images.]
+
+    DEVPORTAL="$APIM_HOME/repository/deployment/server/webapps/devportal"
+    PUBLISHER="$APIM_HOME/repository/deployment/server/webapps/publisher"
+    CUSTOM_DEVPORTAL="$CUSTOMIZATIONS_DIR/devportal"
+    CUSTOM_PUBLISHER="$CUSTOMIZATIONS_DIR/publisher"
+
+    # Example — adjust to your actual customization file structure:
+    # replace_directory  "$CUSTOM_DEVPORTAL/site/public/dist"  "$DEVPORTAL/site/public/dist"  "DevPortal dist"
+    # backup_and_replace_file "$CUSTOM_DEVPORTAL/site/public/theme/userTheme.json" "$DEVPORTAL/site/public/theme/userTheme.json" "DevPortal userTheme.json"
+    # replace_directory  "$CUSTOM_PUBLISHER/site/public/dist"  "$PUBLISHER/site/public/dist"  "Publisher dist"
+    # backup_and_replace_file "$CUSTOM_PUBLISHER/site/public/conf/userThemes.js"   "$PUBLISHER/site/public/conf/userThemes.js" "Publisher userThemes.js"
+
+    log_warn "UI_CUSTOMIZATIONS: Add your copy operations above."
+else
+    log_info "Skipping UI customizations (ENABLE_UI_CUSTOMIZATIONS=false)"
+fi
+
+################################################################################
+# STEP 7: Copy custom handler JARs (optional)
+################################################################################
+if [ "${ENABLE_CUSTOM_HANDLERS}" = "true" ]; then
+    log_section "Step 7: Copying Custom Handler JARs"
+
+    LIB_DEST="$APIM_HOME/repository/components/lib"
+    DROPINS_DEST="$APIM_HOME/repository/components/dropins"
+    mkdir -p "$DROPINS_DEST"
+
+    # [DOC_STEP: List your custom handler JARs that go to lib/ and dropins/]
+    # Example:
+    # copy_file "$CUSTOM_HANDLERS_DIR/your-handler-1.0.jar" "$LIB_DEST/your-handler-1.0.jar" "Custom handler JAR"
+    # copy_file "$CUSTOM_HANDLERS_DIR/your-dropins-handler.jar" "$DROPINS_DEST/your-dropins-handler.jar" "Custom dropins JAR"
+
+    log_warn "CUSTOM_HANDLERS: Add your JAR copy operations above."
+else
+    log_info "Skipping custom handlers (ENABLE_CUSTOM_HANDLERS=false)"
+fi
+
+################################################################################
+# STEP 8: Copy custom velocity_template.xml (optional)
+################################################################################
+if [ "${ENABLE_CUSTOM_VELOCITY_TEMPLATE}" = "true" ]; then
+    log_section "Step 8: Replacing velocity_template.xml"
+    backup_and_replace_file \
+        "$CUSTOM_VELOCITY_TEMPLATE" \
+        "$APIM_HOME/repository/resources/api_templates/velocity_template.xml" \
+        "velocity_template.xml"
+else
+    log_info "Skipping velocity template (ENABLE_CUSTOM_VELOCITY_TEMPLATE=false)"
+fi
+
+################################################################################
+# STEP 9: Run ciphertool (optional)
+################################################################################
+if [ "${ENABLE_CIPHERTOOL}" = "true" ]; then
+    log_section "Step 9: Ciphertool Configuration"
+    [ -f "$APIM_HOME/bin/ciphertool.sh" ] || { log_error "ciphertool.sh not found."; exit 1; }
+    cd "$APIM_HOME/bin"
+    ./ciphertool.sh -Dconfigure
+    cd - > /dev/null
+    log_info "✓ Ciphertool configuration complete"
+else
+    log_info "Skipping ciphertool (ENABLE_CIPHERTOOL=false)"
+fi
+
+log_section "Pack Preparation Complete"
+log_info "APIM_HOME: $APIM_HOME"
+log_info "Target pack is ready for data migration scripts."
